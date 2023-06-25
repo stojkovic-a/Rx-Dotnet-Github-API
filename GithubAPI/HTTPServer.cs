@@ -21,7 +21,7 @@ namespace GithubSearch
 
         private string address;
         private short Port;
-        private HttpListener listener;
+        private ObservableListener listener;
 
         volatile private int numOfRequests;
         volatile private int numBadRequests;
@@ -33,8 +33,7 @@ namespace GithubSearch
         {
             this.Port = port;
             this.address = address;
-            this.listener = new HttpListener();
-            this.listener.Prefixes.Add("http://" + address + ":" + this.Port.ToString() + "/");
+            this.listener = new ObservableListener(address, port);
 
             numOfRequests = 0;
             numBadRequests = 0;
@@ -45,20 +44,15 @@ namespace GithubSearch
 
         public void Start(System.Threading.CancellationToken token)
         {
-            this.listener.Start();
-            while (true)
-            {
-                HttpListenerContext context = listener.GetContext();
-                Interlocked.Increment(ref numOfRequests);
-                Task t1 = HandleRequest(context);
-
-                if (token.IsCancellationRequested)
+            var listenSub = listener
+                .Do(async c =>
                 {
-                    break;
-                }
-            }
-            Console.WriteLine("Server not listening anymore");
-            Report();
+                    await HandleRequest(c);
+                })
+                .SubscribeOn(new EventLoopScheduler())
+                .Subscribe(
+                
+                );
         }
 
         public async Task HandleRequest(HttpListenerContext context)
