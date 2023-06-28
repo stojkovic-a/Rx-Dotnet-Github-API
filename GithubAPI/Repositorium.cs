@@ -32,27 +32,32 @@ namespace GithubSearch
             scheduler = new EventLoopScheduler();
         }
 
-        public async Task GetRepositoriums(string topic)
+        public async Task GetRepositoriums(string topic,int pNum,int pSize=100 )
         {
             HttpClient client= new HttpClient();
             client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
             client.DefaultRequestHeaders.UserAgent.TryParseAdd("request");
+            string pageUrl = string.Empty;
+            if (pNum == -1)
+            {
+                pageUrl = $"&per_page=100&page=1";
 
-            var url = $"https://api.github.com/search/repositories?q=topic:{topic}";
+            }
+            else
+            {
+                pageUrl = $"&per_page={pSize}&page={pNum}";
+            }
+            var url = $"https://api.github.com/search/repositories?q=topic:{topic}"+pageUrl;
             
-           // _ = Task.Run(async () =>
+           
             await Task.Run(async () =>
             {
-                Console.WriteLine("trying to enter try");
                 try
                 {
                     var response = await client.GetAsync(url);
-                    Console.WriteLine("respones workds");
                     response.EnsureSuccessStatusCode();
-                    Console.WriteLine("Ensure works");
                     var content = await response.Content.ReadAsStringAsync();
                     var repos = JsonConvert.DeserializeObject<dynamic>(content).items;
-                    Console.WriteLine("heyo");
                     //Console.WriteLine(repos[0]);
                     foreach (var r in repos)
                     {
@@ -80,7 +85,7 @@ namespace GithubSearch
 
         public IDisposable Subscribe(IObserver<Repositorium> observer)
         {
-            return repositoriumSubject/*.ObserveOn(this.scheduler)*/.Subscribe(observer);
+            return repositoriumSubject.Subscribe(observer);
         }
     }
 
@@ -90,27 +95,37 @@ namespace GithubSearch
         private string reply = string.Empty;
         private readonly HttpListenerContext context;
         private readonly IScheduler scheduler;
+        private readonly HTTPServers server;
 
-        public RepositoriumObserver(string name,HttpListenerContext c)
+        public RepositoriumObserver(string name,HttpListenerContext c,HTTPServers server)
         {
             this.name = name;
             this.context = c;
             scheduler = new EventLoopScheduler();
+            this.server = server;
         }
         public void OnNext(Repositorium repo)
         {
-            Console.WriteLine($"{name}: {repo.Name}");
+            //Console.WriteLine($"{name}: {repo.Name}");
             this.reply += $"Name:{repo.Name}\nDescription:{repo.Description}\nSize:{repo.Size}\nStars:{repo.Stars}\n" +
                 $"Forks:{repo.Forks}\n\n";
         }
         public void OnError(Exception ex)
         {
-            Console.WriteLine("sucker");
+            Console.WriteLine("Doslo je do greske");
         }
         public void OnCompleted()
         {
-            HTTPServers.Response(200, context, reply.Length, reply);
-            Console.WriteLine("Completed");
+            if (reply == string.Empty)
+            {
+                HTTPServers.Response(404, context);
+                this.server.NotFoundAtomicIncrement();
+            }
+            else
+            {
+                HTTPServers.Response(200, context, reply.Length, reply);
+            }
+                Task t1 = HTTPServers.Loggs(true, true, context.Request);
         }
     }
 

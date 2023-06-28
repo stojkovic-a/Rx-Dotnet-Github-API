@@ -36,7 +36,6 @@ class Program
                     Console.WriteLine("Unknown command");
                 }
             } while (command != "quit");
-            Console.ReadLine();
             Console.WriteLine("Server stopped");
         }
     }

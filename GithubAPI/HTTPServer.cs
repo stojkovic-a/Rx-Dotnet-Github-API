@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -14,10 +15,10 @@ namespace GithubSearch
 {
     public class HTTPServers
     {
-        private readonly int pageSize = 5;
+        private readonly int pageSize =7;
 
-        private object fileWriteLock = new object();
-        private readonly string loggFileName = "Loggs.txt";
+        private static object fileWriteLock = new object();
+        private static readonly string loggFileName = "Loggs.txt";
 
         private string address;
         private short Port;
@@ -27,7 +28,6 @@ namespace GithubSearch
         volatile private int numBadRequests;
         volatile private int numNotFoundReq;
         volatile private int numFoundInCache;
-        volatile private int numFoundInDirectory;
 
         public HTTPServers(string address,short port = 5050)
         {
@@ -39,7 +39,6 @@ namespace GithubSearch
             numBadRequests = 0;
             numNotFoundReq = 0;
             numFoundInCache = 0;
-            numFoundInDirectory = 0;
         }
 
         public void Start(System.Threading.CancellationToken token)
@@ -50,13 +49,12 @@ namespace GithubSearch
                     await HandleRequest(c);
                 })
                 .SubscribeOn(new EventLoopScheduler())
-                .Subscribe(
-                
-                );
+                .Subscribe();
         }
 
         public async Task HandleRequest(HttpListenerContext context)
         {
+            Interlocked.Increment(ref numOfRequests);
             string topic = string.Empty;
             int minSize = 0;
             int minStars = 0;
@@ -95,17 +93,17 @@ namespace GithubSearch
                 if (parsed["topic"] != null && parsed["topic"]!=string.Empty)
                 {
                     topic = parsed["topic"];
-                    minSize = Int32.Parse(parsed["size"] ?? "0");
-                    minStars = Int32.Parse(parsed["stars"] ?? "0");
-                    minForks = Int32.Parse(parsed["forks"] ?? "0");
-                    pageination = Int32.Parse(parsed["pging"] ?? "0");
+                    if (!Int32.TryParse(parsed["size"] ?? "0", out minSize)) minSize = 0;
+                    if (!Int32.TryParse(parsed["stars"] ?? "0", out minStars)) minStars = 0;
+                    if(!Int32.TryParse(parsed["forks"] ?? "0",out minForks))minForks = 0;
+                    if(! Int32.TryParse(parsed["pging"] ?? "0",out pageination))pageination=0;
                     if (pageination == 1)
                     {
-                        pageNum = Int32.Parse(parsed["pg"] ?? "1");
+                        if(! Int32.TryParse(parsed["pg"] ?? "1",out pageNum))pageNum=1;
                     }
                     else
                     {
-                        pageNum = 0;
+                        pageNum = -1;
                     }
                 }
                 else
@@ -119,18 +117,18 @@ namespace GithubSearch
             {
                 var repoStream = new RepositoriumStream();
 
-                var observer1 = new RepositoriumObserver("Observer 1",context);
+                var observer1 = new RepositoriumObserver("Observer 1",context,this);
 
                 var filteredStream = repoStream.Where(r => r.Size > minSize && r.Forks > minForks && r.Stars > minStars);
-                if (pageination == 1) {
-                    filteredStream=filteredStream.Skip((pageNum-1)*pageSize).Take(pageSize);
-                }
+                //if (pageination == 1) {
+                //    filteredStream=filteredStream.Skip((pageNum-1)*pageSize).Take(pageSize);
+                //}
 
                 var subscription1 = filteredStream
-                   // .SubscribeOn(Scheduler.Default)
+                    .SubscribeOn(Scheduler.Default)//demonstrativno samo
                     .Subscribe(observer1);
 
-                 await repoStream.GetRepositoriums(topic);
+                 await repoStream.GetRepositoriums(topic,pageNum,pageSize);
                 subscription1.Dispose();
             }
             else
@@ -172,7 +170,7 @@ namespace GithubSearch
                 response.ContentType = "text/html";
                 body = @"<html>
                     <head><title>Not Found</title></head>
-                    <body>Gif Not Found</body>
+                    <body>Corresponding Results Not Found</body>
                                 </html>";
                 try
                 {
@@ -211,15 +209,19 @@ namespace GithubSearch
             Console.WriteLine($"{this.numBadRequests} were bad requests");
             Console.WriteLine($"{this.numNotFoundReq} were not found");
             Console.WriteLine($"Of {this.numOfRequests - this.numBadRequests - this.numNotFoundReq} found requests," +
-                $" {this.numFoundInCache} were found in cache and {this.numFoundInDirectory} were found in directorty");
+                $" {this.numFoundInCache} were found in cache");
         }
 
-        private async Task Loggs(bool valid, bool successful,HttpListenerRequest request)
+        public static async Task Loggs(bool valid, bool successful,HttpListenerRequest request)
         {
             string text = string.Empty;
             if (!valid)
             {
                 text = @"--Invalid request received at " + DateTime.Now.ToString() + "\n";
+            }
+            else if (valid && successful)
+            {
+                text = @"--Valid request received at " + DateTime.Now.ToString() + "\n";
             }
             else
             {
@@ -241,21 +243,26 @@ namespace GithubSearch
                 WriteFile(text);
         }
 
-        private void WriteFile(string text)
+        private static void WriteFile(string text)
         {
-            if (!File.Exists(this.loggFileName))
+            if (!File.Exists(HTTPServers.loggFileName))
             {
-                File.Create(this.loggFileName);
-                TextWriter tw = new StreamWriter(this.loggFileName);
+                File.Create(HTTPServers.loggFileName);
+                TextWriter tw = new StreamWriter(HTTPServers.loggFileName);
                 tw.Write(text);
                 tw.Close();
             }
-            else if (File.Exists(this.loggFileName))
+            else if (File.Exists(HTTPServers.loggFileName))
             {
-                TextWriter tw = new StreamWriter(this.loggFileName, true);
+                TextWriter tw = new StreamWriter(HTTPServers.loggFileName, true);
                 tw.Write(text);
                 tw.Close();
             }
+        }
+
+        public void NotFoundAtomicIncrement()
+        {
+            Interlocked.Increment(ref this.numNotFoundReq);
         }
     }
 }
