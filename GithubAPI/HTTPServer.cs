@@ -1,4 +1,5 @@
-﻿using System;
+﻿using GithubAPI;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -15,7 +16,9 @@ namespace GithubSearch
 {
     public class HTTPServers
     {
-        private readonly int pageSize =7;
+        //ConcurrentCache cache = new ConcurrentCache();
+
+        private readonly int defaultPageSize =7;
 
         private static object fileWriteLock = new object();
         private static readonly string loggFileName = "Loggs.txt";
@@ -61,6 +64,7 @@ namespace GithubSearch
             int minForks = 0;
             int pageination = 0;
             int pageNum = 0;
+            int pageSizePom = 100;
             bool valid = true;
             if (context.Request.HttpMethod != "GET") { valid = false; }
 
@@ -99,11 +103,13 @@ namespace GithubSearch
                     if(! Int32.TryParse(parsed["pging"] ?? "0",out pageination))pageination=0;
                     if (pageination == 1)
                     {
+                        pageSizePom = this.defaultPageSize;
                         if(! Int32.TryParse(parsed["pg"] ?? "1",out pageNum))pageNum=1;
                     }
                     else
                     {
                         pageNum = -1;
+                        pageSizePom = 100;
                     }
                 }
                 else
@@ -115,6 +121,15 @@ namespace GithubSearch
 
             if (valid)
             {
+                Request request = new Request
+                {
+                    Topic = topic,
+                    Size = minSize,
+                    Stars = minStars,
+                    Forks = minForks,
+                    pageNum = pageNum,
+                    pageSize = pageSizePom
+                };
                 var repoStream = new RepositoriumStream();
 
                 var observer1 = new RepositoriumObserver("Observer 1",context,this);
@@ -128,7 +143,7 @@ namespace GithubSearch
                     .SubscribeOn(Scheduler.Default)//demonstrativno samo
                     .Subscribe(observer1);
 
-                 await repoStream.GetRepositoriums(topic,pageNum,pageSize);
+                 await repoStream.GetRepositoriums(request,this);
                 subscription1.Dispose();
             }
             else
@@ -263,6 +278,10 @@ namespace GithubSearch
         public void NotFoundAtomicIncrement()
         {
             Interlocked.Increment(ref this.numNotFoundReq);
+        }
+        public void FoundInCacheAtomicIncrement()
+        {
+            Interlocked.Increment(ref this.numFoundInCache);
         }
     }
 }

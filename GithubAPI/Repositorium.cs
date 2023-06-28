@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using GithubAPI;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -32,55 +33,76 @@ namespace GithubSearch
             scheduler = new EventLoopScheduler();
         }
 
-        public async Task GetRepositoriums(string topic,int pNum,int pSize=100 )
+        public async Task GetRepositoriums(Request r,HTTPServers server )
         {
-            HttpClient client= new HttpClient();
-            client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-            client.DefaultRequestHeaders.UserAgent.TryParseAdd("request");
-            string pageUrl = string.Empty;
-            if (pNum == -1)
-            {
-                pageUrl = $"&per_page=100&page=1";
+            //List<Repositorium> reposPom = new List<Repositorium>();
+            //if (ConcurrentCache.ReturunIfExists(r, out reposPom))
+            //{
+            //    server.FoundInCacheAtomicIncrement();
+            //    foreach (var rp in reposPom)
+            //    {
+            //        repositoriumSubject.OnNext(rp);
+            //        Console.WriteLine("hello");
+            //    }
+            //    Console.WriteLine("pre");
+            //    repositoriumSubject.OnCompleted();
+            //    Console.WriteLine("psole");
 
-            }
-            else
-            {
-                pageUrl = $"&per_page={pSize}&page={pNum}";
-            }
-            var url = $"https://api.github.com/search/repositories?q=topic:{topic}"+pageUrl;
-            
-           
-            await Task.Run(async () =>
-            {
-                try
+            //}
+            //else
+            //{
+
+                HttpClient client = new HttpClient();
+                client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                client.DefaultRequestHeaders.UserAgent.TryParseAdd("request");
+                string pageUrl = string.Empty;
+                if (r.pageNum == -1)
                 {
-                    var response = await client.GetAsync(url);
-                    response.EnsureSuccessStatusCode();
-                    var content = await response.Content.ReadAsStringAsync();
-                    var repos = JsonConvert.DeserializeObject<dynamic>(content).items;
-                    //Console.WriteLine(repos[0]);
-                    foreach (var r in repos)
+                    pageUrl = $"&per_page=100&page=1";
+
+                }
+                else
+                {
+                    pageUrl = $"&per_page={r.pageSize}&page={r.pageNum}";
+                }
+                var url = $"https://api.github.com/search/repositories?q=topic:{r.Topic}" + pageUrl;
+
+
+                await Task.Run(async () =>
+                {
+                    try
                     {
-                        var newRepo = new Repositorium
+                        var response = await client.GetAsync(url);
+                        response.EnsureSuccessStatusCode();
+                        var content = await response.Content.ReadAsStringAsync();
+                        var repos = JsonConvert.DeserializeObject<dynamic>(content).items;
+                        //Console.WriteLine(repos[0]);
+                        List<Repositorium> listOfRepos = new List<Repositorium>();
+                        foreach (var re in repos)
                         {
-                            Name = r.name,
-                            Description = r.description,
-                            Forks = r.forks_count,
-                            Size = r.size,
-                            Stars = r.stargazers_count,
-                        };
-                        repositoriumSubject.OnNext(newRepo);
+                            var newRepo = new Repositorium
+                            {
+                                Name = re.name,
+                                Description = re.description,
+                                Forks = re.forks_count,
+                                Size = re.size,
+                                Stars = re.stargazers_count,
+                            };
+                            listOfRepos.Add(newRepo);
+                            repositoriumSubject.OnNext(newRepo);
+                        }
+                        ConcurrentCache.TryAdd(r, listOfRepos);
+                        repositoriumSubject.OnCompleted();
                     }
-                    repositoriumSubject.OnCompleted();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Something went wrong");
-                    Console.WriteLine(ex);
-                    Console.WriteLine(ex.Message);
-                    repositoriumSubject.OnError(ex);
-                }
-            });
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Something went wrong");
+                        Console.WriteLine(ex);
+                        Console.WriteLine(ex.Message);
+                        repositoriumSubject.OnError(ex);
+                    }
+                });
+           // }
         }
 
         public IDisposable Subscribe(IObserver<Repositorium> observer)
@@ -116,6 +138,7 @@ namespace GithubSearch
         }
         public void OnCompleted()
         {
+            Console.WriteLine("COmpleted");
             if (reply == string.Empty)
             {
                 HTTPServers.Response(404, context);
